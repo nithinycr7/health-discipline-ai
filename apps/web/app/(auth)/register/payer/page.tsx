@@ -22,7 +22,7 @@ export default function PayerRegisterPage() {
     try {
       const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
       const response = await authApi.registerPayer({ ...form, timezone });
-      localStorage.setItem('token', response.data.token);
+      localStorage.setItem('token', response.token);
       router.push('/onboarding/patient-info');
     } catch (err: any) {
       setError(err.message || 'Registration failed. Please try again.');

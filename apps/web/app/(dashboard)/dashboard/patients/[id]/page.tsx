@@ -21,6 +21,8 @@ export default function PatientDetailPage() {
   const [calendar, setCalendar] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'today' | 'calendar' | 'calls' | 'medicines'>('today');
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (!token || !id) return;
@@ -91,6 +93,39 @@ export default function PatientDetailPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button
+            variant="secondary"
+            disabled={previewLoading}
+            onClick={async () => {
+              if (audioUrl) {
+                // Already have audio, just play it
+                const audio = new Audio(audioUrl);
+                audio.play();
+                return;
+              }
+              setPreviewLoading(true);
+              try {
+                const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+                const res = await fetch(`${API_URL}/api/v1/patients/${id}/test-call/preview`, {
+                  method: 'POST',
+                  headers: { 'Authorization': `Bearer ${token}` },
+                });
+                if (!res.ok) throw new Error('Failed to generate preview');
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                setAudioUrl(url);
+                const audio = new Audio(url);
+                audio.play();
+              } catch (err) {
+                console.error('Preview failed:', err);
+                alert('Failed to generate call preview. Make sure ElevenLabs is configured.');
+              } finally {
+                setPreviewLoading(false);
+              }
+            }}
+          >
+            {previewLoading ? 'Generating...' : audioUrl ? 'Play Again' : 'Preview Call'}
+          </Button>
           {patient.isPaused ? (
             <Button onClick={handleResume} variant="default">Resume Calls</Button>
           ) : (

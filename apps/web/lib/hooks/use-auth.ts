@@ -22,7 +22,7 @@ export function useAuth() {
     if (savedToken) {
       setToken(savedToken);
       authApi.me(savedToken)
-        .then((res: any) => setUser(res.data))
+        .then((res: any) => setUser(res))
         .catch(() => {
           localStorage.removeItem('token');
           setToken(null);
@@ -35,11 +35,10 @@ export function useAuth() {
 
   const login = useCallback(async (identifier: string, password?: string) => {
     const response = await authApi.login({ identifier, password });
-    const { user, token } = response.data;
-    localStorage.setItem('token', token);
-    setToken(token);
-    setUser(user);
-    return user;
+    localStorage.setItem('token', response.token);
+    setToken(response.token);
+    setUser(response.user);
+    return response.user;
   }, []);
 
   const logout = useCallback(() => {

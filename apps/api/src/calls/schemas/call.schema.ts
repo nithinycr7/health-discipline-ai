@@ -88,10 +88,16 @@ export class Call {
   twilioCallSid?: string;
 
   @Prop()
+  elevenlabsConversationId?: string;
+
+  @Prop()
   recordingUrl?: string;
 
   @Prop()
   transcriptUrl?: string;
+
+  @Prop({ type: [Object], default: [] })
+  transcript: Array<{ role: string; message: string; timestamp?: Date }>;
 
   @Prop()
   twilioCharges?: number;

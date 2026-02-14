@@ -1,10 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Types } from 'mongoose';
 import { CallsService } from '../calls/calls.service';
 import { MedicinesService } from '../medicines/medicines.service';
 import { PatientsService } from '../patients/patients.service';
-import { TwilioService } from '../integrations/twilio/twilio.service';
-import { ElevenLabsService } from '../integrations/elevenlabs/elevenlabs.service';
+import { ElevenLabsAgentService } from '../integrations/elevenlabs/elevenlabs-agent.service';
 import { NotificationsService } from '../notifications/notifications.service';
 
 interface DueCall {
@@ -22,13 +20,11 @@ export class CallOrchestratorService {
     private callsService: CallsService,
     private medicinesService: MedicinesService,
     private patientsService: PatientsService,
-    private twilioService: TwilioService,
-    private elevenLabsService: ElevenLabsService,
+    private elevenLabsAgentService: ElevenLabsAgentService,
     private notificationsService: NotificationsService,
   ) {}
 
   async processBatch(dueCalls: DueCall[]) {
-    // Process in batches to respect Twilio limits
     const batches = [];
     for (let i = 0; i < dueCalls.length; i += this.MAX_CONCURRENT) {
       batches.push(dueCalls.slice(i, i + this.MAX_CONCURRENT));
@@ -39,8 +35,18 @@ export class CallOrchestratorService {
     }
   }
 
+  /**
+   * Initiate an AI voice call to a patient using ElevenLabs Conversational AI.
+   *
+   * Flow:
+   * 1. Get patient's medicines for this timing
+   * 2. Create a call record in DB
+   * 3. Call ElevenLabs outbound call API with patient data as dynamic variables
+   * 4. ElevenLabs agent conducts the conversation autonomously in Hindi
+   * 5. After call ends, ElevenLabs sends post-call webhook → ElevenLabsWebhookController
+   */
   async initiateCall(dueCall: DueCall) {
-    const { config, patient, timing } = dueCall;
+    const { patient, timing } = dueCall;
 
     try {
       // Get medicines for this timing
@@ -62,74 +68,59 @@ export class CallOrchestratorService {
         status: 'scheduled',
         isFirstCall: patient.callsCompletedCount === 0,
         usedNewPatientProtocol: patient.isNewPatient,
-        medicinesChecked: medicines.map((med) => ({
+        medicinesChecked: medicines.map((med: any) => ({
           medicineId: med._id,
           medicineName: med.brandName,
-          nickname: med.nicknames[0] || med.brandName,
+          nickname: med.nicknames?.[0] || med.brandName,
           response: 'pending',
           timestamp: new Date(),
         })),
       });
 
-      // Generate conversation script
-      const script = this.generateScript(patient, medicines);
-
-      // Generate audio via ElevenLabs
-      const voiceId = patient.preferredVoiceGender === 'male'
-        ? process.env.ELEVENLABS_VOICE_ID_MALE
-        : process.env.ELEVENLABS_VOICE_ID_FEMALE;
-
-      const audioUrl = await this.elevenLabsService.generateSpeech(
-        script.greeting,
-        voiceId,
-        { speed: patient.isNewPatient ? 0.85 : 1.0 },
-      );
-
-      // Place call via Twilio
-      const twilioCall = await this.twilioService.makeCall(
+      // Make outbound call via ElevenLabs Conversational AI Agent
+      // The agent handles the entire conversation autonomously
+      const result = await this.elevenLabsAgentService.makeOutboundCall(
         patient.phone,
-        audioUrl,
         call._id.toString(),
+        {
+          patientName: patient.preferredName,
+          medicines: medicines.map((med: any) => ({
+            name: med.nicknames?.[0] || med.brandName,
+            timing: med.timing,
+            medicineId: med._id.toString(),
+          })),
+          isNewPatient: patient.isNewPatient,
+          hasGlucometer: patient.hasGlucometer,
+          hasBPMonitor: patient.hasBPMonitor,
+          preferredLanguage: patient.preferredLanguage || 'hi',
+        },
       );
 
-      // Update call with Twilio SID
+      // Update call with ElevenLabs conversation ID
       await this.callsService.updateCallStatus(call._id.toString(), 'in_progress', {
-        twilioCallSid: twilioCall.sid,
+        twilioCallSid: result.conversationId,
         initiatedAt: new Date(),
       });
 
-      this.logger.log(`Call initiated for patient ${patient.preferredName} (${patient._id})`);
-    } catch (error) {
+      this.logger.log(
+        `AI call initiated for ${patient.preferredName} (${patient._id}), ` +
+        `conversationId: ${result.conversationId}`,
+      );
+    } catch (error: any) {
       this.logger.error(
         `Failed to initiate call for patient ${patient._id}: ${error.message}`,
       );
     }
   }
 
-  async handleCallCompleted(callId: string, data: any) {
-    const call = await this.callsService.updateCallStatus(callId, 'completed', {
-      endedAt: new Date(),
-      duration: data.duration,
-      twilioCharges: data.price,
-    });
-
-    const patient = await this.patientsService.findById(call.patientId.toString());
-
-    // Track first call and increment count
-    await this.patientsService.setFirstCallAt(patient._id.toString());
-    await this.patientsService.incrementCallCount(patient._id.toString());
-
-    // Send immediate post-call WhatsApp report to payer
-    await this.notificationsService.sendPostCallReport(call, patient);
-
-    this.logger.log(`Call completed for patient ${patient.preferredName}, duration: ${data.duration}s`);
-  }
-
+  /**
+   * Handle call failure (e.g., SIP failures, invalid numbers).
+   * Note: Most completion handling is done by ElevenLabsWebhookController via post-call webhook.
+   */
   async handleCallFailed(callId: string, status: string, errorCode?: string) {
     await this.callsService.updateCallStatus(callId, status);
 
     if (errorCode === '21217') {
-      // Invalid phone number
       const call = await this.callsService.findById(callId);
       const patient = await this.patientsService.findById(call.patientId.toString());
       await this.patientsService.update(patient._id.toString(), patient.userId.toString(), {
@@ -139,26 +130,5 @@ export class CallOrchestratorService {
 
       await this.notificationsService.sendInvalidPhoneAlert(call, patient);
     }
-  }
-
-  private generateScript(patient: any, medicines: any[]) {
-    const greeting = patient.isNewPatient
-      ? `Namaste ${patient.preferredName}! Main Health Discipline AI se bol raha hoon. Aapke ${patient.userId} ne yeh seva shuru ki hai. Kya aap theek hain?`
-      : `Namaste ${patient.preferredName}! Aap kaisi feel kar rahe hain aaj?`;
-
-    const medicineQuestions = medicines.map((med) => {
-      const name = med.nicknames[0] || med.brandName;
-      return `${name} li kya ${med.timing} mein?`;
-    });
-
-    return {
-      greeting,
-      medicineQuestions,
-      vitalsPrompt: patient.hasGlucometer || patient.hasBPMonitor
-        ? 'Kya aapne aaj sugar ya BP check kiya?'
-        : null,
-      moodCheck: 'Aap kaisi feel kar rahe hain?',
-      closing: `Bahut accha ${patient.preferredName}! Apna khayal rakhiye. Kal phir baat karenge.`,
-    };
   }
 }

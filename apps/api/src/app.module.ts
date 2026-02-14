@@ -16,6 +16,7 @@ import { IntegrationsModule } from './integrations/integrations.module';
 import { ReportsModule } from './reports/reports.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { HealthModule } from './health/health.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
 
 @Module({
   imports: [
@@ -41,6 +42,7 @@ import { HealthModule } from './health/health.module';
     ReportsModule,
     NotificationsModule,
     HealthModule,
+    WebhooksModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

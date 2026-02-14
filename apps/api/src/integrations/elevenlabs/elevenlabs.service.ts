@@ -61,6 +61,48 @@ export class ElevenLabsService {
     }
   }
 
+  /**
+   * Generate speech and return raw audio buffer (for browser playback).
+   */
+  async generateSpeechBuffer(
+    text: string,
+    voiceId: string,
+    options: { speed?: number } = {},
+  ): Promise<Buffer> {
+    if (!this.apiKey) {
+      throw new Error('ElevenLabs API key not configured');
+    }
+
+    const response = await fetch(
+      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+      {
+        method: 'POST',
+        headers: {
+          'xi-api-key': this.apiKey,
+          'Content-Type': 'application/json',
+          'Accept': 'audio/mpeg',
+        },
+        body: JSON.stringify({
+          text,
+          model_id: 'eleven_multilingual_v2',
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.75,
+            speed: options.speed || 1.0,
+          },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`ElevenLabs API error: ${response.status} - ${errText}`);
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    return Buffer.from(arrayBuffer);
+  }
+
   async healthCheck(): Promise<{ status: string }> {
     if (!this.apiKey) return { status: 'not_configured' };
 

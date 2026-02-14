@@ -61,8 +61,9 @@ export default function PatientInfoPage() {
         age: parseInt(form.age),
       };
 
-      await patientsApi.create(patientData, token!);
-      router.push('/dashboard');
+      const patient = await patientsApi.create(patientData, token!);
+      const patientId = patient._id || patient.id;
+      router.push(`/dashboard/patients/${patientId}/medicines/add?onboarding=true`);
     } catch (err: any) {
       setError(err.message || 'Failed to create patient');
     } finally {

@@ -20,11 +20,9 @@ export interface RegisterHospitalRequest {
 }
 
 export interface AuthResponse {
-  data: {
-    user: any;
-    token: string;
-    refreshToken: string;
-  };
+  user: any;
+  token: string;
+  refreshToken: string;
 }
 
 export const authApi = {

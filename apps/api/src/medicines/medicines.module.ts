@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
 import { MedicinesController } from './medicines.controller';
 import { MedicinesService } from './medicines.service';
@@ -13,7 +13,7 @@ import { PatientsModule } from '../patients/patients.module';
       { name: Medicine.name, schema: MedicineSchema },
       { name: MedicineCatalog.name, schema: MedicineCatalogSchema },
     ]),
-    PatientsModule,
+    forwardRef(() => PatientsModule),
   ],
   controllers: [MedicinesController],
   providers: [MedicinesService, MedicineCatalogService],
